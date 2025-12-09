@@ -199,42 +199,66 @@ class CurveMLP(nn.Module):
 # 4. Training + snapshots
 # -----------------------------
 
-def train_curve_mlp(s, coords, num_epochs=10000, lr=1e-3):
+def train_curve_mlp(s, coords, num_epochs=3000, lr=1e-3):
     """
-    Train MLP to fit f(s) ~ coords.
-    s: (N,) array
-    coords: (N,2) array
+    Train MLP to fit f(s) ~ coords, and record:
+      - loss per epoch
+      - total gradient norm per epoch
+      - per-parameter gradient norms per epoch
     """
-    s_tensor = (torch.tensor(s, dtype=torch.float32)*2-1).unsqueeze(1)       # (N,1)
+    # Prepare tensors
+    s_tensor = torch.tensor(s, dtype=torch.float32).unsqueeze(1)       # (N,1)
     points_tensor = torch.tensor(coords, dtype=torch.float32)          # (N,2)
 
     model = CurveMLP()
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
-    num_epochs = num_epochs
+    # Choose snapshot epochs (1-based indexing)
     save_epochs = [0, 50, 200, 800, 1500, num_epochs]
     snapshots = {}
+
+    # For analysis
+    losses = []
+    total_grad_norms = []
+    grad_history = {name: [] for name, _ in model.named_parameters()}
 
     # Save prediction at epoch 0 (untrained)
     with torch.no_grad():
         pred0 = model(s_tensor).detach().numpy()
     snapshots[0] = pred0
 
-    losses = []
-
     for epoch in range(num_epochs):
+        # Forward
         pred = model(s_tensor)
         loss = criterion(pred, points_tensor)
 
         optimizer.zero_grad()
         loss.backward()
+
+        # ---- Gradient analysis before the optimizer step ----
+        total_norm = 0.0
+        for name, p in model.named_parameters():
+            if p.grad is not None:
+                gnorm = p.grad.detach().norm().item()
+                grad_history[name].append(gnorm)
+                total_norm += gnorm ** 2
+            else:
+                grad_history[name].append(0.0)
+        total_norm = total_norm ** 0.5
+        total_grad_norms.append(total_norm)
+        # -----------------------------------------------
+
         optimizer.step()
 
         losses.append(loss.item())
 
         if (epoch + 1) % 200 == 0:
-            print(f"Epoch {epoch + 1}/{num_epochs}, Loss = {loss.item():.6f}")
+            print(
+                f"Epoch {epoch + 1}/{num_epochs}, "
+                f"Loss = {loss.item():.6f}, "
+                f"Total grad norm = {total_norm:.6f}"
+            )
 
         current_epoch = epoch + 1
         if current_epoch in save_epochs:
@@ -242,7 +266,7 @@ def train_curve_mlp(s, coords, num_epochs=10000, lr=1e-3):
                 pred_points = model(s_tensor).detach().numpy()
             snapshots[current_epoch] = pred_points
 
-    return model, snapshots, losses, save_epochs
+    return model, snapshots, losses, total_grad_norms, grad_history, save_epochs
 
 
 # -----------------------------
@@ -269,15 +293,55 @@ def plot_snapshots(snapshots, true_coords, save_epochs, out_dir):
     plt.close(fig)
 
 
-def plot_loss(losses, out_dir):
+def plot_loss_and_grad(losses, total_grad_norms, out_dir):
+    fig, ax1 = plt.subplots(figsize=(6, 4))
+
+    epochs = np.arange(len(losses))
+
+    # Loss on left axis (log scale)
+    color1 = "tab:blue"
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("MSE Loss (log scale)", color=color1)
+    ax1.set_yscale("log")
+    ax1.plot(epochs, losses, color=color1, label="Loss")
+    ax1.tick_params(axis='y', labelcolor=color1)
+
+    # Grad norm on right axis (log scale)
+    ax2 = ax1.twinx()
+    color2 = "tab:red"
+    ax2.set_ylabel("Total gradient norm (log scale)", color=color2)
+    ax2.set_yscale("log")
+    ax2.plot(epochs, total_grad_norms, color=color2, alpha=0.7, label="Grad norm")
+    ax2.tick_params(axis='y', labelcolor=color2)
+
+    fig.tight_layout()
+    out_path = out_dir / "loss_and_gradnorm_log.png"
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_layer_grad_history(grad_history, out_dir, max_layers=4):
+    """
+    grad_history: dict name -> list of norms per epoch
+    Plots up to max_layers parameter tensors (typically weights) to avoid clutter.
+    """
+    # pick a few interesting parameters (usually the weight matrices)
+    weight_keys = [k for k in grad_history.keys() if "weight" in k]
+    weight_keys = weight_keys[:max_layers]
+
     fig = plt.figure(figsize=(6, 4))
-    plt.plot(losses)
+    epochs = np.arange(len(next(iter(grad_history.values()))))
+
+    for k in weight_keys:
+        plt.plot(epochs, grad_history[k], label=k)
+
     plt.xlabel("Epoch")
-    plt.ylabel("MSE Loss")
-    plt.title("Training loss over epochs")
+    plt.ylabel("Gradient norm")
+    plt.title("Per-layer gradient norms")
+    plt.legend()
     plt.grid(True)
 
-    out_path = out_dir / "training_loss_curve.png"
+    out_path = out_dir / "layer_gradnorms.png"
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
@@ -392,7 +456,7 @@ def main():
     # 4) Train MLP
     epochs = int(sys.argv[2])
     learning_rate = float(sys.argv[3])
-    model, snapshots, losses, save_epochs = train_curve_mlp(
+    model, snapshots, losses, total_grad_norms, grad_history, save_epochs = train_curve_mlp(
         s, coords, num_epochs=epochs, lr=learning_rate
     )
 
@@ -400,7 +464,8 @@ def main():
     plot_snapshots(snapshots, coords, save_epochs, out_dir)
 
     # 6) Plot loss curve
-    plot_loss(losses, out_dir)
+    plot_loss_and_grad(losses, total_grad_norms, out_dir)
+    plot_layer_grad_history(grad_history, out_dir)
 
     export_curve_reconstruction(model, out_dir, num_points=2000)
 
