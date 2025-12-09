@@ -175,19 +175,24 @@ def parameterize_by_arclength(coords):
 # 3. Define MLP model
 # -----------------------------
 
+class Sin(nn.Module):
+    def forward(self, x):
+        return torch.sin(x)
+
 class CurveMLP(nn.Module):
     def __init__(self):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(1, 64),
-            nn.Tanh(),
+            Sin(),
             nn.Linear(64, 64),
             nn.Tanh(),
             nn.Linear(64, 2)  # outputs (x, y)
         )
 
     def forward(self, s):
-        return self.net(s)
+        s_scaled = s * 2 * np.pi  # scale input to [0, 2pi]
+        return self.net(s_scaled)
 
 
 # -----------------------------
@@ -200,7 +205,7 @@ def train_curve_mlp(s, coords, num_epochs=10000, lr=1e-3):
     s: (N,) array
     coords: (N,2) array
     """
-    s_tensor = torch.tensor(s, dtype=torch.float32).unsqueeze(1)       # (N,1)
+    s_tensor = (torch.tensor(s, dtype=torch.float32)*2-1).unsqueeze(1)       # (N,1)
     points_tensor = torch.tensor(coords, dtype=torch.float32)          # (N,2)
 
     model = CurveMLP()
@@ -346,8 +351,8 @@ def export_curve_reconstruction(model, out_dir, num_points=2000):
 # -----------------------------
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python handwritten_curve_fit.py input.png [optional_out_prefix]")
+    if len(sys.argv) < 4:
+        print("Usage: python handwritten_curve_fit.py input.png epochs learning_rate [optional_out_prefix]")
         sys.exit(1)
 
     img_path = Path(sys.argv[1])
@@ -356,7 +361,7 @@ def main():
         sys.exit(1)
 
     # Optional second argument: out_prefix
-    out_prefix = sys.argv[2] if len(sys.argv) >= 3 else None
+    out_prefix = sys.argv[4] if len(sys.argv) >= 5 else None
 
     # --- Follow your pattern with Path and datetime ---
     img_path = Path(img_path)
@@ -385,8 +390,10 @@ def main():
     s, coords = parameterize_by_arclength(coords_ordered)
 
     # 4) Train MLP
+    epochs = int(sys.argv[2])
+    learning_rate = float(sys.argv[3])
     model, snapshots, losses, save_epochs = train_curve_mlp(
-        s, coords, num_epochs=10000, lr=1e-3
+        s, coords, num_epochs=epochs, lr=learning_rate
     )
 
     # 5) Plot snapshots
