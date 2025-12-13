@@ -1,0 +1,6 @@
+Run ID: 20251209_1129
+Num full points: 1966
+Num selected points: 1769
+Keep fraction: 0.9
+Final MSE (full curve): 1.272214e-04
+Lambda sparsity (Method B): 0.001

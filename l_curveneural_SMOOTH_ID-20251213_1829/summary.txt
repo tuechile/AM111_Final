@@ -1,0 +1,11 @@
+Run ID: 20251213_1829
+Num full points: 1966
+Ks tested: [20, 50, 100]
+
+Results:
+Bezier K=20, MSE=2.688621e-04
+BSpline K=20, MSE=3.973616e-05
+Bezier K=50, MSE=4.151281e-05
+BSpline K=50, MSE=9.119861e-07
+Bezier K=100, MSE=9.658756e-06
+BSpline K=100, MSE=1.561048e-07

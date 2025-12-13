@@ -1,0 +1,8 @@
+Run ID: 20251213_1810
+Num full points: 1966
+Ks tested: [20, 50, 100]
+
+Results:
+K=20, MSE=4.353239e-05
+K=50, MSE=1.669268e-06
+K=100, MSE=2.316591e-07

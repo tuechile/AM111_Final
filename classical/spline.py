@@ -1,24 +1,9 @@
 """
 Classical spline reconstruction of a handwritten curve.
 
-Usage:
-    python handwritten_curve_spline_fit.py input.png [num_points] [smooth_factor] [optional_out_prefix]
-
-Arguments:
-    input.png        : path to input image (single stroke or character)
-    num_points       : # of points to sample on the reconstructed spline (default: 2000)
-    smooth_factor    : smoothing parameter 's' for splprep (default: 1e-4; 0 gives interpolating spline)
-    optional_out_prefix : base name for the output directory (default: derived from input name)
-
-This script will:
-1. Load a handwriting image.
-2. Binarize and skeletonize to get a 1-pixel-wide curve.
-3. Extract skeleton pixels, order them into a path, and parameterize by arc length s in [0,1].
-4. Fit a parametric cubic B-spline to (x(s), y(s)).
-5. Save:
-   - a PNG comparing skeleton vs spline,
-   - a dense spline rendering (PNG),
-   - a vector spline path (SVG).
+Now also saves:
+ - spline_tck.npz : mathematical representation of the spline (knots, control points, degree)
+ - spline_geometry.csv : sampled s, x(s), y(s), curvature(s)
 """
 
 import sys
@@ -40,20 +25,10 @@ from scipy.interpolate import splprep, splev
 # -----------------------------
 
 def load_and_skeletonize(path, out_dir, show_intermediate=True):
-    """
-    Load an image, convert to grayscale, binarize, and skeletonize.
-    Returns a binary skeleton image (True at skeleton pixels).
-    Saves intermediate visualization into out_dir.
-    """
     img = imread(path, as_gray=True)
 
-    # Otsu thresholding
     thresh = threshold_otsu(img)
-
-    # Assume dark ink on light background:
     binary = img < thresh
-
-    # Skeletonize (Zhang-Suen-like thinning)
     skeleton = skeletonize(binary)
 
     if show_intermediate:
@@ -81,27 +56,15 @@ def load_and_skeletonize(path, out_dir, show_intermediate=True):
 # -----------------------------
 
 def extract_ordered_curve_from_skeleton(skeleton):
-    """
-    Given a skeleton (bool array), build a graph of 8-connected pixels,
-    then compute an Eulerian trail (walk that covers all edges, revisiting
-    intersection nodes as needed). This gives a single continuous path that
-    includes self-intersections instead of skipping branches.
-
-    Returns:
-        coords: array (M, 2) with normalized (x, y) coords in [0,1],
-                with y flipped so orientation matches the original image.
-    """
     ys, xs = np.nonzero(skeleton)
     if xs.size == 0:
-        raise ValueError("No skeleton pixels found – check your image / thresholding.")
+        raise ValueError("No skeleton pixels found.")
 
     N = xs.size
-    coords_pix = np.stack([xs, ys], axis=1).astype(np.float32)  # (N, 2) (x,y)
+    coords_pix = np.stack([xs, ys], axis=1).astype(np.float32)
 
-    # Map (row, col) -> node index
     coord_to_idx = {(ys[i], xs[i]): i for i in range(N)}
 
-    # Build adjacency list (undirected, 8-connected)
     adj = [[] for _ in range(N)]
     neighbors = [(-1, -1), (-1, 0), (-1, 1),
                  (0, -1),          (0, 1),
@@ -110,17 +73,12 @@ def extract_ordered_curve_from_skeleton(skeleton):
     for i in range(N):
         r, c = ys[i], xs[i]
         for dr, dc in neighbors:
-            nr, nc = r + dr, c + dc
-            j = coord_to_idx.get((nr, nc))
+            j = coord_to_idx.get((r + dr, c + dc))
             if j is not None:
                 adj[i].append(j)
 
-    # Choose a start node for Eulerian trail
     odd_vertices = [i for i in range(N) if len(adj[i]) % 2 == 1]
-    if len(odd_vertices) >= 1:
-        start = odd_vertices[0]
-    else:
-        start = 0
+    start = odd_vertices[0] if odd_vertices else 0
 
     # Hierholzer's algorithm
     adj_copy = [nbrs.copy() for nbrs in adj]
@@ -139,28 +97,21 @@ def extract_ordered_curve_from_skeleton(skeleton):
         else:
             trail.append(stack.pop())
 
-    trail = trail[::-1]  # forward order
-    coords = coords_pix[trail]   # (M,2)
+    trail = trail[::-1]
+    coords = coords_pix[trail]
 
-    # Normalize to [0,1]
-    x_min, y_min = coords.min(axis=0)
-    x_max, y_max = coords.max(axis=0)
-    coords[:, 0] = (coords[:, 0] - x_min) / (x_max - x_min + 1e-8)
-    coords[:, 1] = (coords[:, 1] - y_min) / (y_max - y_min + 1e-8)
+    # Normalize into [0,1]
+    min_vals = coords.min(axis=0)
+    max_vals = coords.max(axis=0)
+    coords = (coords - min_vals) / (max_vals - min_vals + 1e-8)
 
-    # Flip y so plot orientation matches original image
+    # Flip y upward
     coords[:, 1] = 1.0 - coords[:, 1]
 
     return coords
 
 
 def parameterize_by_arclength(coords):
-    """
-    Given ordered 2D coordinates, compute arc length parameter s in [0,1].
-    Returns:
-        s: (N,) array in [0,1]
-        coords: unchanged (N,2)
-    """
     diffs = coords[1:] - coords[:-1]
     seg_lengths = np.linalg.norm(diffs, axis=1)
     arc = np.concatenate([[0.0], np.cumsum(seg_lengths)])
@@ -169,41 +120,41 @@ def parameterize_by_arclength(coords):
 
 
 # -----------------------------
-# 3. Spline fitting
+# 3. Spline fitting utilities
 # -----------------------------
 
 def fit_parametric_spline(s, coords, smooth_factor=1e-4, degree=3):
-    """
-    Fit a 2D parametric B-spline (x(s), y(s)) to the given data.
-
-    Args:
-        s            : (N,) parameter values in [0,1] (arc length normalized).
-        coords       : (N,2) array with x,y coordinates.
-        smooth_factor: 's' parameter for splprep (0 for interpolation).
-        degree       : spline degree k (1..5, typical 3 for cubic).
-
-    Returns:
-        tck : tuple returned by splprep (spline representation).
-    """
     x = coords[:, 0]
     y = coords[:, 1]
-
-    # splprep wants a sequence of 1D arrays; we pass u=s to enforce our parametrization
     tck, _ = splprep([x, y], u=s, s=smooth_factor, k=degree)
     return tck
 
 
-def sample_spline(tck, num_points=2000):
-    """
-    Sample a fitted spline uniformly in s in [0,1].
-
-    Returns:
-        points: (num_points, 2) array of sampled (x,y) coordinates.
-    """
+def compute_curvature_along_spline(tck, num_points=2000):
     s_dense = np.linspace(0.0, 1.0, num_points)
-    x_dense, y_dense = splev(s_dense, tck)
-    pts = np.stack([x_dense, y_dense], axis=1)
-    return pts
+
+    # Position
+    x, y = splev(s_dense, tck)
+
+    # First derivative
+    dx, dy = splev(s_dense, tck, der=1)
+
+    # Second derivative
+    ddx, ddy = splev(s_dense, tck, der=2)
+
+    # Curvature κ(s)
+    num = dx * ddy - dy * ddx
+    denom = (dx**2 + dy**2)**1.5 + 1e-12
+    kappa = num / denom
+
+    pts = np.stack([x, y], axis=1)
+    return s_dense, pts, kappa
+
+
+def save_tck_npz(tck, path):
+    t, c, k = tck
+    cx, cy = c
+    np.savez(path, t=t, cx=cx, cy=cy, k=k)
 
 
 # -----------------------------
@@ -211,29 +162,18 @@ def sample_spline(tck, num_points=2000):
 # -----------------------------
 
 def save_svg_curve(points, path):
-    """
-    Save a polyline curve as an SVG.
-
-    points: array (M, 2) in normalized [0,1] coordinates (x,y) with y upward.
-    SVG has viewBox 0..1 x 0..1. We flip y because SVG's y-axis goes downward.
-    """
     path = Path(path)
     with open(path, "w") as f:
         f.write('<svg viewBox="0 0 1 1" xmlns="http://www.w3.org/2000/svg">\n')
         f.write('<polyline points="')
         for x, y in points:
-            y_svg = 1.0 - y  # flip back for SVG coord system
+            y_svg = 1.0 - y
             f.write(f"{x},{y_svg} ")
         f.write('" fill="none" stroke="black" stroke-width="0.002"/>\n')
         f.write('</svg>\n')
 
 
 def save_png_curve(points, path, dpi=300):
-    """
-    Save a curve as a PNG using matplotlib.
-
-    points: array (M, 2) in normalized [0,1] coordinates (x,y) with y upward.
-    """
     fig = plt.figure(figsize=(4, 4))
     ax = plt.gca()
     ax.plot(points[:, 0], points[:, 1], 'k-')
@@ -244,9 +184,6 @@ def save_png_curve(points, path, dpi=300):
 
 
 def plot_skeleton_vs_spline(coords, spline_points, out_dir):
-    """
-    Plot the original skeleton points vs the fitted spline.
-    """
     fig = plt.figure(figsize=(4, 4))
     ax = plt.gca()
     ax.plot(coords[:, 0], coords[:, 1], 'k.', markersize=2, label="Skeleton")
@@ -254,8 +191,7 @@ def plot_skeleton_vs_spline(coords, spline_points, out_dir):
     ax.set_aspect('equal')
     ax.legend()
     ax.axis('off')
-    out_path = out_dir / "spline_fit_vs_skeleton.png"
-    fig.savefig(out_path, dpi=300, bbox_inches="tight", pad_inches=0.0)
+    fig.savefig(out_dir / "spline_fit_vs_skeleton.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -269,56 +205,48 @@ def main():
         sys.exit(1)
 
     img_path = Path(sys.argv[1])
-    if not img_path.exists():
-        print(f"Error: input file not found: {img_path}")
-        sys.exit(1)
-
-    # Optional arguments
     num_points = int(sys.argv[2]) if len(sys.argv) >= 3 else 2000
     smooth_factor = float(sys.argv[3]) if len(sys.argv) >= 4 else 1e-4
     out_prefix = sys.argv[4] if len(sys.argv) >= 5 else None
 
-    # Output directory naming (similar pattern to your NN script)
-    img_path = Path(img_path)
     if out_prefix is None:
         out_prefix = img_path.with_suffix("")
     else:
         out_prefix = Path(out_prefix)
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M")
-    tagged_prefix = f"{out_prefix}_SplineID-{run_id}"
-    out_dir = Path(tagged_prefix)
+    out_dir = Path(f"{out_prefix}_SplineID-{run_id}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Run ID: {run_id}")
-    print(f"Saving outputs to directory: {out_dir}")
+    print(f"Saving to: {out_dir}")
     print(f"num_points={num_points}, smooth_factor={smooth_factor}")
 
-    # 1) Load + skeletonize
     skeleton = load_and_skeletonize(str(img_path), out_dir, show_intermediate=True)
-
-    # 2) Extract ordered curve coordinates
     coords_ordered = extract_ordered_curve_from_skeleton(skeleton)
-
-    # 3) Parameterize by arc length
     s, coords = parameterize_by_arclength(coords_ordered)
-
-    # 4) Fit spline
     tck = fit_parametric_spline(s, coords, smooth_factor=smooth_factor, degree=3)
 
-    # 5) Sample dense spline curve
-    spline_pts = sample_spline(tck, num_points=num_points)
+    # Sample spline + curvature
+    s_dense, spline_pts, kappa = compute_curvature_along_spline(tck, num_points)
 
-    # 6) Visualizations & exports
+    # --- SAVE NEW FILES ---
+    # 1. Mathematical spline representation
+    npz_path = out_dir / "spline_tck.npz"
+    save_tck_npz(tck, npz_path)
+    print(f"Saved spline representation (tck) to: {npz_path}")
+
+    # 2. CSV containing s, x(s), y(s), curvature
+    csv_path = out_dir / "spline_geometry.csv"
+    data = np.column_stack([s_dense, spline_pts[:, 0], spline_pts[:, 1], kappa])
+    np.savetxt(csv_path, data, delimiter=",",
+               header="s,x,y,curvature", comments="")
+    print(f"Saved spline geometry CSV to: {csv_path}")
+
+    # Existing visual outputs
     plot_skeleton_vs_spline(coords, spline_pts, out_dir)
-
-    spline_png_path = out_dir / "spline_curve.png"
-    save_png_curve(spline_pts, spline_png_path)
-    print(f"Saved spline PNG to: {spline_png_path}")
-
-    spline_svg_path = out_dir / "spline_curve.svg"
-    save_svg_curve(spline_pts, spline_svg_path)
-    print(f"Saved spline SVG to: {spline_svg_path}")
+    save_png_curve(spline_pts, out_dir / "spline_curve.png")
+    save_svg_curve(spline_pts, out_dir / "spline_curve.svg")
 
     print("Done.")
 
