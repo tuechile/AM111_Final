@@ -1,0 +1,12 @@
+MNIST idx: 16080
+Label: 1
+Num full points: 66
+Best K points: 66
+Compression ratio: 1.0000
+Target MSE: 1.000000e-04
+Best-K search MSE (search phase): 6.953851e-05
+Final MSE (full curve): 3.160888e-05
+Lambda sparsity (Method B): 0.001
+Importance epochs: 10000
+Search epochs per K: 3000
+Final epochs: 10000

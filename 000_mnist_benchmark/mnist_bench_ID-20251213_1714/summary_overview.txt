@@ -1,0 +1,11 @@
+Run ID: 20251213_1714
+Num samples requested: 200
+Num successful samples: 200
+Num failed samples: 0
+
+Avg N_full: 78.7
+Avg best_K: 78.7
+Avg compression ratio K/N_full: 0.9998
+Median compression ratio: 1.0000
+Avg final MSE: 5.0562e-05
+Median final MSE: 5.1334e-05

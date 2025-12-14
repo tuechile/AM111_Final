@@ -1,0 +1,8 @@
+Run ID: 20251213_1905
+Num full points: 1966
+Ks tested: [20, 50, 100]
+
+Results:
+NeuralBasis K=20, MSE=1.457712e-03
+NeuralBasis K=50, MSE=5.465768e-04
+NeuralBasis K=100, MSE=1.096490e-03
