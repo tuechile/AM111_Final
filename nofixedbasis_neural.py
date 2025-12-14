@@ -169,6 +169,10 @@ def parameterize_by_arclength(coords):
 # 3. Neural basis curve
 # -----------------------------
 
+class SinLayer(nn.Module):
+    def forward(self, x):
+        return torch.sin(np.pi * x)
+
 class NeuralBasisCurve(nn.Module):
     """
     Curve with K control points and a learned basis B_theta(t).
@@ -189,9 +193,9 @@ class NeuralBasisCurve(nn.Module):
         # Tiny MLP: R -> R^K
         self.mlp = nn.Sequential(
             nn.Linear(1, 64),
-            nn.ReLU(inplace=True),
+            SinLayer(),
             nn.Linear(64, 64),
-            nn.ReLU(inplace=True),
+            nn.Tanh(),
             nn.Linear(64, K),
         )
 
