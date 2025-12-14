@@ -407,7 +407,7 @@ def demo_train_autoencoder(strokes: list, epochs: int = 3000):
     criterion = nn.MSELoss()
 
     # Epochs we want to visualize
-    checkpoints = [500, 1000, 1500, 2000, 2500, 3000]
+    checkpoints = [1, 100, 500, 1000, 2000, 3000]
     epoch_preds = {}
 
     for epoch in range(1, epochs + 1):
@@ -418,7 +418,7 @@ def demo_train_autoencoder(strokes: list, epochs: int = 3000):
         loss.backward()
         optimizer.step()
 
-        if epoch % 100 == 0:
+        if epoch % 500 == 0:
             print(f"Epoch {epoch}/{epochs}, loss={loss.item():.6f}")
 
         if epoch in checkpoints:
