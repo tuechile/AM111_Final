@@ -1,0 +1,11 @@
+Run ID: 20251214_1700
+Num full points: 4550
+Best K points: 4550
+Compression ratio: 1.0000
+Target MSE: 1.000000e-04
+Best-K search MSE (search phase): 6.989961e-04
+Final MSE (full curve): 1.282933e-04
+Lambda sparsity (Method B): 0.001
+Importance epochs: 5000
+Search epochs per K: 1500
+Final epochs: 5000
