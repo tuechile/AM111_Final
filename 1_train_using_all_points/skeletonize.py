@@ -174,13 +174,16 @@ def parameterize_by_arclength(coords):
 # -----------------------------
 # 3. Define MLP model
 # -----------------------------
+class Sin(nn.Module):
+    def forward(self, x):
+        return torch.sin(x)
 
 class CurveMLP(nn.Module):
     def __init__(self):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(1, 64),
-            nn.Tanh(),
+            Sin(),
             nn.Linear(64, 64),
             nn.Tanh(),
             nn.Linear(64, 2)  # outputs (x, y)
