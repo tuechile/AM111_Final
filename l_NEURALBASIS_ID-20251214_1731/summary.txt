@@ -1,6 +1,0 @@
-Run ID: 20251214_1731
-Num full points: 4550
-Ks tested: [20]
-
-Results:
-NeuralBasis K=20, MSE=1.777197e-03

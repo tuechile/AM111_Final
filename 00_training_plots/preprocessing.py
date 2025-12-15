@@ -364,26 +364,26 @@ class SimpleStrokeAutoencoder(nn.Module):
         out = self.decoder(z)
         return out
 
-def plot_multi_epoch_progress(X_true, epoch_preds):
-    """
-    Show a single matplotlib figure with:
-      - True stroke
-      - Predictions at epochs 500,1000,...,3000
-    """
-    plt.figure(figsize=(8,4))
-
-    # Plot true curve
-    plt.plot(X_true[:,0], X_true[:,1], label="True", linewidth=3, color="black")
-
-    # Plot each predicted curve
-    for epoch in sorted(epoch_preds.keys()):
-        pred = epoch_preds[epoch]
-        plt.plot(pred[:,0], pred[:,1], "--", label=f"Epoch {epoch}")
-
-    plt.gca().set_aspect("equal", adjustable="box")
-    plt.grid(True)
+def plot_mse_over_epochs(mse_history, checkpoints):
+    """Plot MSE over training epochs with checkpoint markers."""
+    epochs = np.arange(1, len(mse_history) + 1)
+    
+    plt.figure(figsize=(10, 6))
+    plt.plot(epochs, mse_history, 'b-', linewidth=2, label='Training MSE')
+    plt.xlabel('Epoch')
+    plt.ylabel('Mean Squared Error (MSE)')
+    plt.title('MSE Over Training Epochs (Autoencoder)')
+    plt.yscale('log')  # Log scale for better visualization
+    plt.grid(True, alpha=0.3)
     plt.legend()
-    plt.title("NN approximations at epochs 500–3000")
+    
+    # Add vertical lines at checkpoint epochs
+    for checkpoint in checkpoints:
+        if checkpoint <= len(mse_history):
+            plt.axvline(x=checkpoint, color='r', linestyle='--', alpha=0.7, linewidth=1)
+            plt.text(checkpoint + 50, mse_history[checkpoint-1] * 1.1, f'Epoch {checkpoint}', 
+                    rotation=90, verticalalignment='bottom', fontsize=8)
+    
     plt.tight_layout()
     plt.show()
 
@@ -409,6 +409,9 @@ def demo_train_autoencoder(strokes: list, epochs: int = 3000):
     # Epochs we want to visualize
     checkpoints = [1, 100, 500, 1000, 2000, 3000]
     epoch_preds = {}
+    
+    # Track MSE over all epochs
+    mse_history = []
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -417,6 +420,9 @@ def demo_train_autoencoder(strokes: list, epochs: int = 3000):
         loss = criterion(out, X_t)
         loss.backward()
         optimizer.step()
+
+        # Store MSE for this epoch
+        mse_history.append(loss.item())
 
         if epoch % 500 == 0:
             print(f"Epoch {epoch}/{epochs}, loss={loss.item():.6f}")
@@ -432,7 +438,7 @@ def demo_train_autoencoder(strokes: list, epochs: int = 3000):
     X_xy = X[:, :2]
     plot_epoch_grid(X_true=X_xy, epoch_preds=epoch_preds)
 
-    return model
+    return model, mse_history
 
 
 
@@ -466,10 +472,21 @@ if __name__ == "__main__":
     # Optional: quick NN demo
     do_demo = input("Run simple autoencoder demo on this letter? [y/N]: ").strip().lower()
     if do_demo == "y":
-        model, X, recon = demo_train_autoencoder(processed_strokes, epochs=3000)
+        model, mse_history = demo_train_autoencoder(processed_strokes, epochs=3000)
+
+        # Plot MSE over epochs
+        checkpoints = [1, 100, 500, 1000, 2000, 3000]
+        plot_mse_over_epochs(mse_history, checkpoints)
+
+        # Get final reconstruction for comparison plot
+        X = np.concatenate(processed_strokes, axis=0)
+        X_t = torch.tensor(X, dtype=torch.float32, device="cuda" if torch.cuda.is_available() else "cpu")
+        model.eval()
+        with torch.no_grad():
+            recon = model(X_t).cpu().numpy()
 
         # Plot original vs reconstructed for sanity
-        # We’ll only plot x,y, not derivatives/curvature.
+        # We'll only plot x,y, not derivatives/curvature.
         plt.figure(figsize=(6, 3))
         plt.plot(X[:, 0], X[:, 1], label="original", linewidth=2)
         plt.plot(recon[:, 0], recon[:, 1], "--", label="reconstructed")

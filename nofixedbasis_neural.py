@@ -279,6 +279,17 @@ def train_neural_basis(
     criterion = nn.MSELoss()
 
     losses = []
+    
+    # Define snapshot epochs (6 evenly spaced points including 0 and final)
+    snapshot_epochs = [0] + list(np.linspace(0, num_epochs, 6, dtype=int)[1:])
+    if snapshot_epochs[-1] != num_epochs:
+        snapshot_epochs[-1] = num_epochs
+    snapshots = {}
+
+    # Save initial state (epoch 0)
+    with torch.no_grad():
+        pred_0 = model(t_train).cpu().numpy()
+    snapshots[0] = pred_0
 
     for epoch in range(num_epochs):
         model.train()
@@ -301,6 +312,14 @@ def train_neural_basis(
         optimizer.step()
 
         losses.append(loss.item())
+        
+        # Save snapshot if this epoch is in snapshot_epochs
+        current_epoch = epoch + 1
+        if current_epoch in snapshot_epochs:
+            with torch.no_grad():
+                pred_snapshot = model(t_train).cpu().numpy()
+            snapshots[current_epoch] = pred_snapshot
+        
         if verbose and (epoch + 1) % 500 == 0:
             print(
                 f"[NeuralBasis K={K}] Epoch {epoch+1}/{num_epochs}, "
@@ -313,7 +332,7 @@ def train_neural_basis(
         pred_final = model(t_train).cpu().numpy()
     mse_final = np.mean((pred_final - coords_full) ** 2)
 
-    return model, np.array(losses), mse_final
+    return model, np.array(losses), mse_final, snapshots, snapshot_epochs
 
 
 def eval_neural_basis_dense(model, num_points=1000):
@@ -372,6 +391,41 @@ def plot_skeleton_vs_curve(skeleton, curve_points, label, out_dir, filename):
     plt.legend()
 
     out_path = out_dir / filename
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_training_snapshots(skeleton, snapshots, snapshot_epochs, K, out_dir):
+    """
+    Plot 6 snapshots showing training progress for a given K.
+    snapshots: dict epoch -> predictions (N,2)
+    snapshot_epochs: list of epochs for snapshots
+    """
+    ys, xs = np.nonzero(skeleton)
+    coords_pix = np.stack([xs, ys], axis=1).astype(np.float32)
+
+    # Normalize skeleton pixels to [0,1]
+    x_min, y_min = coords_pix.min(axis=0)
+    x_max, y_max = coords_pix.max(axis=0)
+    coords_pix[:, 0] = (coords_pix[:, 0] - x_min) / (x_max - x_min + 1e-8)
+    coords_pix[:, 1] = (coords_pix[:, 1] - y_min) / (y_max - y_min + 1e-8)
+    coords_pix[:, 1] = 1.0 - coords_pix[:, 1]  # flip y
+
+    fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+    axes = axes.flatten()
+
+    for i, epoch in enumerate(snapshot_epochs):
+        ax = axes[i]
+        ax.plot(coords_pix[:, 0], coords_pix[:, 1], 'k.', markersize=2, label="Skeleton")
+        pred = snapshots[epoch]
+        ax.plot(pred[:, 0], pred[:, 1], 'r-', linewidth=1.0, label="NeuralBasis")
+        ax.set_title(f"K={K}, Epoch {epoch}")
+        ax.set_aspect('equal')
+        ax.axis('off')
+        ax.legend()
+
+    plt.tight_layout()
+    out_path = out_dir / f"neuralbasis_K{K}_training_snapshots.png"
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
@@ -466,7 +520,7 @@ def main():
 
     for K in K_list:
         print(f"\n=== K={K} control points (NeuralBasis) ===")
-        nb_model, nb_losses, mse_nb = train_neural_basis(
+        nb_model, nb_losses, mse_nb, snapshots, snapshot_epochs = train_neural_basis(
             s_full,
             coords_full,
             K=K,
@@ -486,6 +540,9 @@ def main():
         np.save(out_dir / f"neuralbasis_K{K}_ctrl.npy", nb_ctrl)
 
         plot_loss(nb_losses, out_dir, filename=f"neuralbasis_K{K}_loss_curve.png")
+
+        # Plot training snapshots
+        plot_training_snapshots(skeleton, snapshots, snapshot_epochs, K, out_dir)
 
         # Dense evaluation & plots
         _, nb_dense_pts = eval_neural_basis_dense(nb_model, num_points=1000)

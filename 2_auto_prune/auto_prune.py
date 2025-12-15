@@ -45,7 +45,7 @@ import torch.optim as optim
 # =============================
 
 # Target full-curve MSE for the final model (on normalized [0,1]^2 coords)
-TARGET_MSE = 1e-4
+TARGET_MSE = 1e-2
 
 # Minimum number of points allowed
 MIN_POINTS = 100

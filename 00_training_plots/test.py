@@ -18,12 +18,12 @@ N = 20
 theta = np.linspace(0, 2 * np.pi, N)
 
 # True x, y coordinates of the curve (unit circle)
-x = np.cos(theta)
+x = theta
 y = np.sin(theta)
 
 
 theta_dense = np.linspace(0, 2*np.pi, 400)
-x_dense = np.cos(theta_dense)
+x_dense = theta_dense
 y_dense = np.sin(theta_dense)
 original_curve = np.stack([x_dense, y_dense], axis=1)
 
@@ -73,10 +73,14 @@ num_epochs = 5000
 save_epochs = [0, 200, 400, 800, 2000, 5000]
 snapshots = {}
 
+# List to store MSE values for plotting
+mse_history = []
+
 # Save prediction at epoch 0 (before any training)
 with torch.no_grad():
     pred0 = model(s_tensor).detach().numpy()
 snapshots[0] = pred0
+mse_history.append(criterion(model(s_tensor), points_tensor).item())
 
 for epoch in range(num_epochs):
     # Forward pass: compute current prediction
@@ -89,6 +93,9 @@ for epoch in range(num_epochs):
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
+
+    # Store MSE for this epoch
+    mse_history.append(loss.item())
 
     # Print progress every 500 epochs
     if (epoch + 1) % 500 == 0:
@@ -127,3 +134,33 @@ for i, epoch in enumerate(save_epochs):
 
 plt.tight_layout()
 plt.show()
+
+# -----------------------------
+# 5. Plot MSE over epochs
+# -----------------------------
+
+def plot_mse_over_epochs(mse_history):
+    """Plot MSE (loss) over training epochs."""
+    epochs = np.arange(len(mse_history))
+    
+    plt.figure(figsize=(10, 6))
+    plt.plot(epochs, mse_history, 'b-', linewidth=2, label='Training MSE')
+    plt.xlabel('Epoch')
+    plt.ylabel('Mean Squared Error (MSE)')
+    plt.title('MSE Over Training Epochs')
+    plt.yscale('log')  # Log scale for better visualization
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    
+    # Add vertical lines at snapshot epochs
+    for epoch in save_epochs:
+        if epoch < len(mse_history):
+            plt.axvline(x=epoch, color='r', linestyle='--', alpha=0.7, linewidth=1)
+            plt.text(epoch + 50, mse_history[epoch] * 1.1, f'Epoch {epoch}', 
+                    rotation=90, verticalalignment='bottom', fontsize=8)
+    
+    plt.tight_layout()
+    plt.show()
+
+# Plot MSE over epochs
+plot_mse_over_epochs(mse_history)
