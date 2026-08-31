@@ -186,7 +186,7 @@ class CurveMLP(nn.Module):
             nn.Linear(1, 64),
             Sin(),
             nn.Linear(64, 64),
-            nn.Tanh(),
+            Sin(),
             nn.Linear(64, 2)  # outputs (x, y)
         )
 
